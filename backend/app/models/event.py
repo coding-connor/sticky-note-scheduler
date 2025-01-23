@@ -24,12 +24,20 @@ class WeekdayList(TypeDecorator):
     impl = String
     cache_ok = True
 
-    def process_bind_param(self, value: List[Weekday] | None, dialect) -> str | None:
+    def process_bind_param(
+        self,
+        value: List[Weekday] | None,
+        dialect,
+    ) -> str | None:
         if value is None:
             return None
         return json.dumps([day.value for day in value])
 
-    def process_result_value(self, value: str | None, dialect) -> List[Weekday] | None:
+    def process_result_value(
+        self,
+        value: str | None,
+        dialect,
+    ) -> List[Weekday] | None:
         if value is None:
             return None
         return [Weekday(day) for day in json.loads(value)]
@@ -39,11 +47,16 @@ class Recurrence(Base):
     __tablename__ = "recurrence"
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
-    days_of_week: Mapped[List[Weekday]] = mapped_column(WeekdayList, nullable=False)
+    days_of_week: Mapped[List[Weekday]] = mapped_column(
+        WeekdayList,
+        nullable=False,
+    )
 
     # Relationship
     event: Mapped["Event"] = relationship(
-        "Event", back_populates="recurrence", uselist=False
+        "Event",
+        back_populates="recurrence",
+        uselist=False,
     )
 
 
@@ -57,8 +70,10 @@ class Event(Base):
 
     # Foreign key and relationship
     recurrence_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("recurrence.id"), nullable=True
+        ForeignKey("recurrence.id"),
+        nullable=True,
     )
     recurrence: Mapped[Recurrence | None] = relationship(
-        "Recurrence", back_populates="event"
+        "Recurrence",
+        back_populates="event",
     )
