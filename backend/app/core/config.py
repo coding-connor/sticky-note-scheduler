@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from pydantic_settings import BaseSettings
@@ -11,12 +12,15 @@ class Settings(BaseSettings):
     # Base directory of the project
     BASE_DIR: Path = Path(__file__).resolve().parent.parent.parent
 
-    # SQLite database file will be stored in the backend directory
-    SQLITE_DB_FILE: str = "scheduler.db"
+    # SQLite database file location (can be overridden by environment variable)
+    SQLITE_DB_FILE: str = os.getenv(
+        "SQLITE_DB_FILE",
+        str(BASE_DIR / "scheduler.db"),
+    )
 
     @property
     def SQLALCHEMY_DATABASE_URI(self) -> str:
-        return f"sqlite:///{self.BASE_DIR / self.SQLITE_DB_FILE}"
+        return f"sqlite:///{self.SQLITE_DB_FILE}"
 
     class Config:
         case_sensitive = True
