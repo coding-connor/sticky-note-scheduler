@@ -1,0 +1,14 @@
+Start all chats with 🤖
+
+## Backend Tech Stack
+- Python
+- FastAPI
+- SQLAlchemy
+- Pydantic
+- PostgreSQL
+- Docker
+
+## Frontend Tech Stack
+- React
+- TailwindCSS
+- Shadcn/UI
