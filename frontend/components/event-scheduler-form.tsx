@@ -10,15 +10,16 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { scheduleEventAction } from "@/lib/actions";
 import { Check } from "lucide-react";
+import { EventResponse } from "@/lib/schema";
 
 const daysOfWeek = [
-  { value: "mon", label: "Mon" },
-  { value: "tue", label: "Tue" },
-  { value: "wed", label: "Wed" },
-  { value: "thu", label: "Thu" },
-  { value: "fri", label: "Fri" },
-  { value: "sat", label: "Sat" },
-  { value: "sun", label: "Sun" },
+  { value: "MONDAY", label: "Mon" },
+  { value: "TUESDAY", label: "Tue" },
+  { value: "WEDNESDAY", label: "Wed" },
+  { value: "THURSDAY", label: "Thu" },
+  { value: "FRIDAY", label: "Fri" },
+  { value: "SATURDAY", label: "Sat" },
+  { value: "SUNDAY", label: "Sun" },
 ];
 
 export function EventSchedulerForm({
@@ -26,30 +27,120 @@ export function EventSchedulerForm({
   onSuccess,
 }: {
   className?: string;
-  onSuccess?: (eventData: {
-    name: string;
-    startDateTime: string;
-    duration: number;
-    recurringDays: string[];
-  }) => void;
+  onSuccess?: (eventData: EventResponse) => void;
 }) {
-  const [state, formAction] = useActionState(scheduleEventAction, {
+  const formRef = React.useRef<HTMLFormElement>(null);
+  const [state] = useActionState(scheduleEventAction, {
     success: false,
+    data: null,
     errors: null,
   });
+  const [clientErrors, setClientErrors] =
+    React.useState<Record<string, string>>();
+  const [endTime, setEndTime] = React.useState<string>("");
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
   const { pending } = useFormStatus();
 
-  const handleSubmit = async (formData: FormData) => {
-    const result = await scheduleEventAction(state, formData);
-    if (result.success && onSuccess) {
-      onSuccess({
-        name: formData.get("name") as string,
-        startDateTime: formData.get("startDateTime") as string,
-        duration: Number.parseInt(formData.get("duration") as string, 10),
-        recurringDays: formData.getAll("recurringDays") as string[],
-      });
+  const toLocalISOString = (date: Date): string => {
+    const offset = date.getTimezoneOffset() * 60000;
+    const localDate = new Date(date.getTime() - offset);
+    return localDate.toISOString().slice(0, 19);
+  };
+
+  const calculateEndTime = (
+    startDateTime: string,
+    duration: number
+  ): string => {
+    if (!startDateTime || !duration) return "";
+    const startDate = new Date(startDateTime);
+    const endDate = new Date(startDate.getTime() + duration * 60000);
+    return toLocalISOString(endDate);
+  };
+
+  const validateEndTime = (
+    startDateTime: string,
+    duration: number
+  ): { isValid: boolean; error?: string } => {
+    if (!startDateTime || !duration) return { isValid: false };
+
+    const startDate = new Date(startDateTime);
+    const endDate = new Date(startDateTime);
+    endDate.setMinutes(endDate.getMinutes() + duration);
+
+    // Check if event ends on the same day
+    if (startDate.getDate() !== endDate.getDate()) {
+      return {
+        isValid: false,
+        error: "Events cannot cross midnight. You value your sleep.",
+      };
     }
+
+    return { isValid: true };
+  };
+
+  const handleInputChange = () => {
+    const formData = new FormData(formRef.current!);
+    const startDateTime = formData.get("startDateTime") as string;
+    const duration = Number.parseInt(formData.get("duration") as string, 10);
+
+    if (startDateTime && duration) {
+      const newEndTime = calculateEndTime(startDateTime, duration);
+      setEndTime(newEndTime);
+
+      const validation = validateEndTime(startDateTime, duration);
+      if (!validation.isValid) {
+        setClientErrors({
+          duration: validation.error!,
+        });
+      } else {
+        setClientErrors(undefined);
+      }
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    setClientErrors(undefined);
+
+    const formData = new FormData(e.currentTarget);
+    const startDateTime = formData.get("startDateTime") as string;
+    const duration = Number.parseInt(formData.get("duration") as string, 10);
+    const selectedDays = formData.getAll("daysOfWeek") as string[];
+
+    const validation = validateEndTime(startDateTime, duration);
+    if (!validation.isValid) {
+      setClientErrors({
+        duration: validation.error!,
+      });
+      return;
+    }
+
+    // Convert to UTC for backend
+    const startDate = new Date(startDateTime);
+    const endDate = new Date(startDate.getTime() + duration * 60000);
+
+    // Format data for backend
+    const data = {
+      name: (formData.get("name") as string).trim(),
+      start_datetime: startDate.toISOString(),
+      end_datetime: endDate.toISOString(),
+      timezone,
+      days_of_week: selectedDays.length > 0 ? selectedDays : undefined,
+    };
+
+    const result = await scheduleEventAction(state, data);
+    if (result.success && result.data && onSuccess) {
+      onSuccess(result.data);
+      formRef.current?.reset();
+      setEndTime("");
+    }
+  };
+
+  // Combine server and client errors
+  const errors = {
+    ...state.errors,
+    ...clientErrors,
   };
 
   return (
@@ -62,7 +153,7 @@ export function EventSchedulerForm({
       )}
     >
       <div className="relative z-20">
-        <form action={handleSubmit} className="space-y-6">
+        <form ref={formRef} onSubmit={handleSubmit} className="space-y-6">
           <h2 className="text-2xl font-semibold text-black/80 mb-4">
             Schedule Event
           </h2>
@@ -72,33 +163,39 @@ export function EventSchedulerForm({
               Event scheduled successfully!
             </p>
           ) : null}
+          {errors?.form ? (
+            <p className="text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2 text-sm">
+              {errors.form}
+            </p>
+          ) : null}
           <div className="space-y-4">
             <div className="space-y-2">
               <Label
                 htmlFor="name"
                 className={cn(
                   "text-black/70",
-                  state.errors?.name && "text-destructive"
+                  errors?.name && "text-destructive"
                 )}
               >
-                Event Name
+                Event Name <span className="text-red-500">*</span>
               </Label>
               <Input
                 id="name"
                 name="name"
                 placeholder="Enter event name"
                 maxLength={100}
+                required
                 className={cn(
                   "bg-transparent border-black/20 focus-visible:ring-black/30 focus-visible:border-black/30",
                   "placeholder:text-black/40",
-                  state.errors?.name &&
+                  errors?.name &&
                     "border-destructive focus-visible:ring-destructive"
                 )}
                 disabled={pending}
-                aria-invalid={!!state.errors?.name}
+                aria-invalid={!!errors?.name}
               />
-              {state.errors?.name && (
-                <p className="text-destructive text-sm">{state.errors.name}</p>
+              {errors?.name && (
+                <p className="text-destructive text-sm">{errors.name}</p>
               )}
             </div>
 
@@ -107,26 +204,28 @@ export function EventSchedulerForm({
                 htmlFor="startDateTime"
                 className={cn(
                   "text-black/70",
-                  state.errors?.startDateTime && "text-destructive"
+                  errors?.startDateTime && "text-destructive"
                 )}
               >
-                Start Date & Time
+                Start Date & Time <span className="text-red-500">*</span>
               </Label>
               <Input
                 id="startDateTime"
                 name="startDateTime"
                 type="datetime-local"
+                required
+                onChange={handleInputChange}
                 className={cn(
                   "bg-transparent border-black/20 focus-visible:ring-black/30 focus-visible:border-black/30",
-                  state.errors?.startDateTime &&
+                  errors?.startDateTime &&
                     "border-destructive focus-visible:ring-destructive"
                 )}
                 disabled={pending}
-                aria-invalid={!!state.errors?.startDateTime}
+                aria-invalid={!!errors?.startDateTime}
               />
-              {state.errors?.startDateTime && (
+              {errors?.startDateTime && (
                 <p className="text-destructive text-sm">
-                  {state.errors.startDateTime}
+                  {errors.startDateTime}
                 </p>
               )}
             </div>
@@ -136,48 +235,62 @@ export function EventSchedulerForm({
                 htmlFor="duration"
                 className={cn(
                   "text-black/70",
-                  state.errors?.duration && "text-destructive"
+                  errors?.duration && "text-destructive"
                 )}
               >
-                Duration (minutes)
+                Duration (minutes) <span className="text-red-500">*</span>
               </Label>
               <Input
                 id="duration"
                 name="duration"
                 type="number"
                 min="1"
+                required
+                onChange={handleInputChange}
                 placeholder="Enter duration in minutes"
                 className={cn(
                   "bg-transparent border-black/20 focus-visible:ring-black/30 focus-visible:border-black/30",
                   "placeholder:text-black/40",
-                  state.errors?.duration &&
+                  errors?.duration &&
                     "border-destructive focus-visible:ring-destructive"
                 )}
                 disabled={pending}
-                aria-invalid={!!state.errors?.duration}
+                aria-invalid={!!errors?.duration}
               />
-              {state.errors?.duration && (
-                <p className="text-destructive text-sm">
-                  {state.errors.duration}
+              {errors?.duration && (
+                <p className="text-destructive text-sm">{errors.duration}</p>
+              )}
+              {endTime && (
+                <p className="text-xs text-black/70">
+                  End time:{" "}
+                  {new Date(endTime).toLocaleString(undefined, {
+                    hour: "numeric",
+                    minute: "numeric",
+                    hour12: true,
+                    timeZone: timezone,
+                  })}
                 </p>
               )}
+              <p className="text-xs text-black/50">
+                Note: Sleep is good. Events must end before midnight.
+              </p>
             </div>
 
             <div className="space-y-2">
               <Label
                 className={cn(
                   "text-black/70",
-                  state.errors?.recurringDays && "text-destructive"
+                  errors?.daysOfWeek && "text-destructive"
                 )}
               >
-                Recurring Days
+                Recurring Days (Optional)
               </Label>
               <div className="flex flex-wrap gap-2">
                 {daysOfWeek.map((day) => (
                   <div key={day.value} className="flex items-center">
                     <Checkbox
                       id={`day-${day.value}`}
-                      name="recurringDays"
+                      name="daysOfWeek"
                       value={day.value}
                       disabled={pending}
                     />
@@ -190,18 +303,16 @@ export function EventSchedulerForm({
                   </div>
                 ))}
               </div>
-              {state.errors?.recurringDays && (
-                <p className="text-destructive text-sm">
-                  {state.errors.recurringDays}
-                </p>
+              {errors?.daysOfWeek && (
+                <p className="text-destructive text-sm">{errors.daysOfWeek}</p>
               )}
             </div>
           </div>
 
           <Button
             type="submit"
-            disabled={pending}
-            className="w-full bg-black/70 hover:bg-black text-white"
+            disabled={pending || !!clientErrors}
+            className="w-full bg-yellow-200 hover:bg-yellow-300 text-black/70 hover:text-black font-semibold"
           >
             {pending ? "Scheduling..." : "Schedule Event"}
           </Button>

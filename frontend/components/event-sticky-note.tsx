@@ -1,20 +1,11 @@
 import React from "react";
-import { cn } from "@/lib/utils";
+import { cn, formatEvent, type Event } from "@/lib/utils";
 
-interface EventStickyNoteProps {
-  name: string;
-  startDateTime: string;
-  duration: number;
-  recurringDays?: string[];
-}
+type EventStickyNoteProps = Event;
 
-export function EventStickyNote({
-  name,
-  startDateTime,
-  duration,
-  recurringDays = [],
-}: EventStickyNoteProps) {
-  const isRecurring = recurringDays.length > 0;
+export function EventStickyNote(props: EventStickyNoteProps) {
+  const formattedEvent = formatEvent(props);
+  const isRecurring = (props.recurrence_rule?.days_of_week?.length ?? 0) > 0;
   const bgColor = isRecurring ? "bg-green-200" : "bg-blue-200";
   const rotation = Math.random() * 6 - 3; // Random rotation between -3 and 3 degrees
 
@@ -26,13 +17,17 @@ export function EventStickyNote({
       )}
       style={{ transform: `rotate(${rotation}deg)` }}
     >
-      <h3 className="text-lg font-semibold mb-2">{name}</h3>
+      <h3 className="text-lg font-semibold mb-2">{formattedEvent.name}</h3>
       <p className="text-sm mb-1">
-        Start: {new Date(startDateTime).toLocaleString()}
+        Date: {formattedEvent.localStartDate} at {formattedEvent.localStartTime}
       </p>
-      <p className="text-sm mb-1">Duration: {duration} minutes</p>
-      {isRecurring && (
-        <p className="text-sm">Recurring: {recurringDays.join(", ")}</p>
+      <p className="text-sm mb-1">
+        Duration: {formattedEvent.duration} minutes
+      </p>
+      {isRecurring && formattedEvent.formattedDaysOfWeek && (
+        <p className="text-sm">
+          Recurring: {formattedEvent.formattedDaysOfWeek}
+        </p>
       )}
     </div>
   );

@@ -1,13 +1,18 @@
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import and_, func, or_
+from fastapi import HTTPException
+from sqlalchemy import and_, or_, text
 from sqlalchemy.orm import Session
 
 from app.models.event import Event, RecurrenceRule, Weekday
+from app.schemas.event import EventCreate
 
 
-def get_time_overlap_conditions(start_datetime: datetime, end_datetime: datetime):
+def get_time_overlap_conditions(
+    start_datetime: datetime,
+    end_datetime: datetime,
+):
     """Returns SQLAlchemy filter conditions for checking time overlaps.
 
     Args:
@@ -17,22 +22,31 @@ def get_time_overlap_conditions(start_datetime: datetime, end_datetime: datetime
     Returns:
         SQLAlchemy OR condition containing all overlap cases
     """
+
+    # Convert datetime to minutes since midnight for comparison
+    def to_minutes(dt: datetime) -> int:
+        return dt.hour * 60 + dt.minute
+
+    start_minutes = to_minutes(start_datetime)
+    end_minutes = to_minutes(end_datetime)
+
+    # Base time expressions
+    time_base = (
+        "(CAST(STRFTIME('%H', event.start_datetime) AS INTEGER) * 60 + "
+        "CAST(STRFTIME('%M', event.start_datetime) AS INTEGER))"
+    )
+    end_time_base = (
+        "(CAST(STRFTIME('%H', event.end_datetime) AS INTEGER) * 60 + "
+        "CAST(STRFTIME('%M', event.end_datetime) AS INTEGER))"
+    )
+
     return or_(
         # Case 1: Event starts during our event
-        and_(
-            Event.start_datetime.time() >= start_datetime.time(),
-            Event.start_datetime.time() < end_datetime.time(),
-        ),
+        text(f"{time_base} >= {start_minutes} AND {time_base} < {end_minutes}"),
         # Case 2: Event ends during our event
-        and_(
-            Event.end_datetime.time() > start_datetime.time(),
-            Event.end_datetime.time() <= end_datetime.time(),
-        ),
+        text(f"{end_time_base} > {start_minutes} AND {end_time_base} <= {end_minutes}"),
         # Case 3: Event completely surrounds our event
-        and_(
-            Event.start_datetime.time() <= start_datetime.time(),
-            Event.end_datetime.time() >= end_datetime.time(),
-        ),
+        text(f"{time_base} <= {start_minutes} AND {end_time_base} >= {end_minutes}"),
     )
 
 
@@ -83,59 +97,52 @@ def check_anchor_x_anchor_conflict(
     return len(existing_events) > 0
 
 
+def check_anchor_x_recurrence_conflict(
+    db: Session,
+    start_datetime: datetime,
+    end_datetime: datetime,
+) -> bool:
+    """Check if a new event's anchor datetime conflicts with recurring events."""
+    # Get the weekday of the start datetime
+    weekday = Weekday[start_datetime.strftime("%A").upper()]
+
+    # Find recurring events that happen on this weekday
+    existing_events = (
+        db.query(Event)
+        .join(RecurrenceRule)
+        .filter(
+            Event.recurrence_rule_id.isnot(None),
+            text(f"recurrence_rule.days_of_week LIKE '%{weekday.value}%'"),
+            get_time_overlap_conditions(start_datetime, end_datetime),
+        )
+        .all()
+    )
+
+    return len(existing_events) > 0
+
+
 def check_recurrence_x_anchor_conflict(
     db: Session,
     start_datetime: datetime,
     end_datetime: datetime,
     days_of_week: List[Weekday],
 ) -> bool:
-    """Check if a new event's recurrence pattern conflicts with any future events' anchor dates.
+    """Check if a new recurring event conflicts with existing anchor events."""
+    # Convert weekdays to their string values for SQL comparison
+    weekday_values = [day.value for day in days_of_week]
 
-    Args:
-        db: Database session
-        start_datetime: Start time of new event
-        end_datetime: End time of new event
-        days_of_week: Days on which the new event repeats
-
-    Returns:
-        bool: True if there's a conflict, False otherwise
-    """
-    # Get all future events
-    future_events = (
+    # Find non-recurring events that happen on any of our weekdays
+    existing_events = (
         db.query(Event)
         .filter(
-            # Only get events after our start date
-            Event.start_datetime >= start_datetime,
-            # Convert its start date to a weekday and check if it's in the new event's recurrence pattern
-            func.upper(func.strftime("%A", Event.start_datetime)).in_([day.value for day in days_of_week]),
-            # Check time overlap
+            Event.recurrence_rule_id.is_(None),
+            or_(*[text(f"UPPER(strftime('%A', event.start_datetime)) = '{day}'") for day in weekday_values]),
             get_time_overlap_conditions(start_datetime, end_datetime),
         )
         .all()
     )
 
-    return len(future_events) > 0
-
-
-def check_anchor_x_recurrence_conflict(
-    db: Session,
-    start_datetime: datetime,
-    end_datetime: datetime,
-) -> bool:
-    anchor_weekday = Weekday(start_datetime.strftime("%A").upper())
-
-    conflicts = (
-        db.query(Event)
-        .join(Event.recurrence_rule)
-        .filter(
-            Event.recurrence_rule_id.isnot(None),
-            Event.start_datetime <= end_datetime,
-            RecurrenceRule.days_of_week.contains([anchor_weekday]),
-            get_time_overlap_conditions(start_datetime, end_datetime),
-        )
-        .all()
-    )
-    return len(conflicts) > 0
+    return len(existing_events) > 0
 
 
 def check_recurrence_x_recurrence_conflict(
@@ -144,17 +151,23 @@ def check_recurrence_x_recurrence_conflict(
     end_datetime: datetime,
     days_of_week: List[Weekday],
 ) -> bool:
-    conflicts = (
+    """Check if a new recurring event conflicts with existing recurring events."""
+    # Convert weekdays to their string values for SQL comparison
+    weekday_values = [day.value for day in days_of_week]
+
+    # Find recurring events that happen on any of our weekdays
+    existing_events = (
         db.query(Event)
-        .join(Event.recurrence_rule)
+        .join(RecurrenceRule)
         .filter(
             Event.recurrence_rule_id.isnot(None),
-            or_(*[RecurrenceRule.days_of_week.like(f'%"{day.value}"%') for day in days_of_week]),
+            or_(*[text(f"recurrence_rule.days_of_week LIKE '%{day}%'") for day in weekday_values]),
             get_time_overlap_conditions(start_datetime, end_datetime),
         )
         .all()
     )
-    return len(conflicts) > 0
+
+    return len(existing_events) > 0
 
 
 def check_time_conflict(
@@ -199,3 +212,73 @@ def check_time_conflict(
         return True
 
     return False
+
+
+def get_events(
+    db: Session,
+    skip: int = 0,
+    limit: int = 100,
+) -> List[Event]:
+    """Get a list of events with pagination.
+
+    Args:
+        db: Database session
+        skip: Number of records to skip
+        limit: Maximum number of records to return
+
+    Returns:
+        List of events
+    """
+    return db.query(Event).order_by(Event.start_datetime).offset(skip).limit(limit).all()
+
+
+def create_event(
+    db: Session,
+    event: EventCreate,
+) -> Event:
+    """Create a new event, optionally with recurrence.
+
+    Args:
+        db: Database session
+        event: Event data including optional recurrence rule
+
+    Returns:
+        Created event
+
+    Raises:
+        HTTPException: If there's a time conflict with existing events
+    """
+    # Check for time conflicts
+    if check_time_conflict(
+        db=db,
+        start_datetime=event.start_datetime,
+        end_datetime=event.end_datetime,
+        timezone=event.timezone,
+        days_of_week=event.days_of_week,
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="This time slot conflicts with an existing event",
+        )
+
+    # Create recurrence rule if days are specified
+    recurrence_rule = None
+    if event.days_of_week:
+        recurrence_rule = RecurrenceRule(days_of_week=event.days_of_week)
+        db.add(recurrence_rule)
+        db.flush()  # Get the ID without committing
+
+    # Create the event
+    db_event = Event(
+        name=event.name,
+        start_datetime=event.start_datetime,
+        end_datetime=event.end_datetime,
+        timezone=event.timezone,
+        recurrence_rule_id=recurrence_rule.id if recurrence_rule else None,
+    )
+
+    db.add(db_event)
+    db.commit()
+    db.refresh(db_event)
+
+    return db_event
