@@ -27,7 +27,7 @@ ENV SQLITE_DB_FILE=/data/scheduler.db
 
 USER appuser
 
-EXPOSE 9000
+EXPOSE 8000
 
 # Run migrations and start the app
 CMD ["sh", "-c", "poetry run alembic upgrade head && poetry run uvicorn app.main:app --host 0.0.0.0 --port 9000"]
