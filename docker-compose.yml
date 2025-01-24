@@ -1,9 +1,25 @@
+version: "3.8"
+
 services:
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     ports:
-      - "9000:9000"
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
     environment:
-      - SQLITE_DB_FILE=/data/scheduler.db
+      - DATABASE_URL=sqlite:///./sql_app.db
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://backend:8000
+    depends_on:
+      - backend

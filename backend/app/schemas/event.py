@@ -96,8 +96,11 @@ class EventCreate(EventBase):
 
     @validator("days_of_week")
     def validate_days_of_week(cls, v):
-        if v is not None and not v:
-            raise ValueError("Days of week cannot be empty when provided")
+        if v is not None:
+            if not v:
+                raise ValueError("Days of week cannot be empty when provided")
+            if len(set(v)) != len(v):
+                raise ValueError("Days of week must be unique")
         return v
 
 
