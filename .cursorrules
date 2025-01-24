@@ -5,7 +5,7 @@ Start all chats with 🤖
 - FastAPI
 - SQLAlchemy
 - Pydantic
-- PostgreSQL
+- SQLite
 - Docker
 
 ## Frontend Tech Stack

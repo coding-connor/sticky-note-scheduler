@@ -1,7 +1,6 @@
 from typing import List
-from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -11,25 +10,23 @@ from app.services import event as event_service
 router = APIRouter(prefix="/events", tags=["events"])
 
 
-@router.post("/", response_model=EventRead)
+@router.post(
+    "/",
+    response_model=EventRead,
+    responses={
+        409: {"description": "Time slot conflict with existing event"},
+    },
+)
 def create_event(
     event: EventCreate,
     db: Session = Depends(get_db),
 ) -> EventRead:
-    """Create a new event."""
+    """Create a new event.
+
+    The event can be a single occurrence or recurring weekly on specified days.
+    Duration is specified in minutes.
+    """
     return event_service.create_event(db=db, event=event)
-
-
-@router.get("/{event_id}", response_model=EventRead)
-def get_event(
-    event_id: UUID,
-    db: Session = Depends(get_db),
-) -> EventRead:
-    """Get a single event by ID."""
-    db_event = event_service.get_event(db=db, event_id=event_id)
-    if db_event is None:
-        raise HTTPException(status_code=404, detail="Event not found")
-    return db_event
 
 
 @router.get("/", response_model=List[EventRead])

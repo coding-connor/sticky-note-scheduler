@@ -1,23 +1,29 @@
 import json
-from datetime import datetime
-from enum import IntEnum
+from datetime import datetime, time
+from enum import Enum
 from typing import List
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo
 
-from sqlalchemy import ForeignKey, String, TypeDecorator
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import DateTime, ForeignKey, String, TypeDecorator
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from app.db.session import Base
 
 
-class Weekday(IntEnum):
-    MONDAY = 0
-    TUESDAY = 1
-    WEDNESDAY = 2
-    THURSDAY = 3
-    FRIDAY = 4
-    SATURDAY = 5
-    SUNDAY = 6
+class Weekday(str, Enum):
+    MONDAY = "MONDAY"
+    TUESDAY = "TUESDAY"
+    WEDNESDAY = "WEDNESDAY"
+    THURSDAY = "THURSDAY"
+    FRIDAY = "FRIDAY"
+    SATURDAY = "SATURDAY"
+    SUNDAY = "SUNDAY"
+
+    @property
+    def day_number(self) -> int:
+        """Get the day number (0 = Monday, 6 = Sunday)."""
+        return list(Weekday).index(self)
 
 
 class WeekdayList(TypeDecorator):
@@ -43,8 +49,8 @@ class WeekdayList(TypeDecorator):
         return [Weekday(day) for day in json.loads(value)]
 
 
-class Recurrence(Base):
-    __tablename__ = "recurrence"
+class RecurrenceRule(Base):
+    __tablename__ = "recurrence_rule"
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     days_of_week: Mapped[List[Weekday]] = mapped_column(
@@ -55,7 +61,7 @@ class Recurrence(Base):
     # Relationship
     event: Mapped["Event"] = relationship(
         "Event",
-        back_populates="recurrence",
+        back_populates="recurrence_rule",
         uselist=False,
     )
 
@@ -65,15 +71,31 @@ class Event(Base):
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
-    start_time: Mapped[datetime] = mapped_column(nullable=False)
-    end_time: Mapped[datetime] = mapped_column(nullable=False)
+    start_datetime: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    end_datetime: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    timezone: Mapped[str] = mapped_column(String(50), nullable=False)
 
     # Foreign key and relationship
-    recurrence_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("recurrence.id"),
+    recurrence_rule_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("recurrence_rule.id"),
         nullable=True,
     )
-    recurrence: Mapped[Recurrence | None] = relationship(
-        "Recurrence",
+    recurrence_rule: Mapped[RecurrenceRule | None] = relationship(
+        "RecurrenceRule",
         back_populates="event",
     )
+
+    @validates("end_datetime")
+    def validate_end_time(self, key, end_datetime):
+        if hasattr(self, "timezone"):
+            local_tz = ZoneInfo(self.timezone)
+            local_end = end_datetime.astimezone(local_tz)
+
+            if local_end.time() > time(21, 0):
+                raise ValueError("Events cannot end after 9:00 PM local time")
+
+        return end_datetime
