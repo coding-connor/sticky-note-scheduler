@@ -1,12 +1,11 @@
 import json
-from datetime import datetime, time
+from datetime import datetime
 from enum import Enum
 from typing import List
 from uuid import UUID, uuid4
-from zoneinfo import ZoneInfo
 
 from sqlalchemy import DateTime, ForeignKey, String, TypeDecorator
-from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.session import Base
 
@@ -71,12 +70,8 @@ class Event(Base):
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
-    start_datetime: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
-    end_datetime: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
+    start_datetime: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    end_datetime: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     timezone: Mapped[str] = mapped_column(String(50), nullable=False)
 
     # Foreign key and relationship
@@ -88,14 +83,3 @@ class Event(Base):
         "RecurrenceRule",
         back_populates="event",
     )
-
-    @validates("end_datetime")
-    def validate_end_time(self, key, end_datetime):
-        if hasattr(self, "timezone"):
-            local_tz = ZoneInfo(self.timezone)
-            local_end = end_datetime.astimezone(local_tz)
-
-            if local_end.time() > time(21, 0):
-                raise ValueError("Events cannot end after 9:00 PM local time")
-
-        return end_datetime

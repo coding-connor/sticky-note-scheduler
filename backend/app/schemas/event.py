@@ -3,7 +3,7 @@ from typing import List, Optional
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, ConfigDict, model_validator, validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator, validator
 
 from app.models.event import Weekday
 
@@ -30,10 +30,26 @@ class RecurrenceRuleRead(RecurrenceRuleBase):
 
 
 class EventBase(BaseModel):
-    name: str
-    start_datetime: datetime
-    end_datetime: datetime
-    timezone: str = "America/New_York"
+    name: str = Field(
+        ...,
+        description="Name of the event",
+        example="Team Meeting",
+    )
+    start_datetime: datetime = Field(
+        ...,
+        description="Start time of the event (assumed to be in UTC)",
+        example="2024-03-20T14:00:00.000",
+    )
+    end_datetime: datetime = Field(
+        ...,
+        description="End time of the event (assumed to be in UTC)",
+        example="2024-03-20T15:00:00.000",
+    )
+    timezone: str = Field(
+        ...,
+        description="User's local timezone (e.g. 'America/New_York')",
+        example="America/Los_Angeles",
+    )
 
     @validator("name")
     def validate_name(cls, v):
@@ -41,17 +57,28 @@ class EventBase(BaseModel):
             raise ValueError("Name cannot be empty")
         return v.strip()
 
-    @validator("end_datetime")
-    def validate_end_time(cls, end_datetime, values):
-        # Convert to local time for validation
-        local_tz = ZoneInfo(values.get("timezone", "America/New_York"))
-        local_end = end_datetime.astimezone(local_tz)
+    @validator("timezone")
+    def validate_timezone(cls, v):
+        try:
+            ZoneInfo(v)
+        except Exception:
+            raise ValueError("Invalid timezone. Must be a valid IANA timezone identifier")
+        return v
 
-        # Check if end time is after 9 PM
-        if local_end.time() > time(21, 0):
-            raise ValueError("Events cannot end after 9:00 PM local time")
+    @model_validator(mode="after")
+    def validate_end_time(self):
+        # By this point, end_datetime is already a datetime object
+        try:
+            local_tz = ZoneInfo(self.timezone)
+            local_end = self.end_datetime.astimezone(local_tz)
 
-        return end_datetime
+            # Check if end time is after 9 PM in user's timezone
+            if local_end.time() > time(21, 0):
+                raise ValueError(f"Events cannot end after 9:00 PM in {self.timezone}")
+        except Exception as e:
+            raise ValueError(f"Error validating end time: {str(e)}")
+
+        return self
 
     @model_validator(mode="after")
     def validate_times(self):
@@ -61,7 +88,11 @@ class EventBase(BaseModel):
 
 
 class EventCreate(EventBase):
-    days_of_week: Optional[List[Weekday]] = None
+    days_of_week: Optional[List[Weekday]] = Field(
+        default=None,
+        description="Optional list of days for recurring events",
+        example=["MONDAY", "WEDNESDAY"],
+    )
 
     @validator("days_of_week")
     def validate_days_of_week(cls, v):

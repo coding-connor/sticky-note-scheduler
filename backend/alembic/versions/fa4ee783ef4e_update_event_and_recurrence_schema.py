@@ -13,7 +13,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "fa4ee783ef4e"
-down_revision: Union[str, None] = None
+down_revision: Union[str, None] = "7847b15c4247"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -45,9 +45,7 @@ def upgrade() -> None:
         sa.Column("name", sa.String(100), nullable=False),
         sa.Column("start_datetime", sa.DateTime(timezone=True), nullable=False),
         sa.Column("end_datetime", sa.DateTime(timezone=True), nullable=False),
-        sa.Column(
-            "timezone", sa.String(50), nullable=False, server_default="America/New_York"
-        ),
+        sa.Column("timezone", sa.String(50), nullable=False, server_default="America/New_York"),
         sa.Column("recurrence_rule_id", sa.UUID(), nullable=True),
         sa.ForeignKeyConstraint(["recurrence_rule_id"], ["recurrence_rule.id"]),
         sa.PrimaryKeyConstraint("id"),
