@@ -11,6 +11,12 @@ My first mini-project built with the Cursor IDE - and woah is it something. I'm 
 - Recurring events continue indefinitely.
 - The first event (anchor event) for a recurring event might not fall on the same day as future events derived from it's recurrence rule (e.g. An event on Tuesday, might then only reoccur on Saturdays)
 
+## Bugs
+
+- tl;dr timezones
+- Conflict detection is done in UTC, and if, for example, the comparison is to see if a recurring event series that starts in January conflicts with a one-time event in June, then the UTC time comparison will be off due to daylights savings. I store timezone, so the fix is here to be made when/if I have the time.
+- There's another similar bug, where if the UTC time crosses into the next day, then it also disrupts the time conflict comparison (because the conflict detection involves casting into minutes and doing relevant < and > checks, which reset to 0 once UTC reaches the next day).
+
 ## Tech Stack
 
 ### Frontend

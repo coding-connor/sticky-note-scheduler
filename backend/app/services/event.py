@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import List, Optional
 
 from fastapi import HTTPException
-from sqlalchemy import and_, or_, text
+from sqlalchemy import Integer, and_, case, cast, func, or_, text
 from sqlalchemy.orm import Session
 
 from app.models.event import Event, RecurrenceRule, Weekday
@@ -21,6 +21,10 @@ def get_time_overlap_conditions(
 
     Returns:
         SQLAlchemy OR condition containing all overlap cases
+
+    Bug: Edge case around daylights savings, since the time is stored in UTC, and the timezone is not considered.
+    Bug: Edge case around casting time to minutes, since it doesn't consider the timezone,
+         if UTC time crosses into the next day, it resets to 0.
     """
 
     # Convert datetime to minutes since midnight for comparison
@@ -31,23 +35,23 @@ def get_time_overlap_conditions(
     end_minutes = to_minutes(end_datetime)
 
     # Base time expressions
-    time_base = (
+    event_start = (
         "(CAST(STRFTIME('%H', event.start_datetime) AS INTEGER) * 60 + "
         "CAST(STRFTIME('%M', event.start_datetime) AS INTEGER))"
     )
-    end_time_base = (
+    event_end = (
         "(CAST(STRFTIME('%H', event.end_datetime) AS INTEGER) * 60 + "
         "CAST(STRFTIME('%M', event.end_datetime) AS INTEGER))"
     )
 
-    return or_(
-        # Case 1: Event starts during our event
-        text(f"{time_base} >= {start_minutes} AND {time_base} < {end_minutes}"),
-        # Case 2: Event ends during our event
-        text(f"{end_time_base} > {start_minutes} AND {end_time_base} <= {end_minutes}"),
-        # Case 3: Event completely surrounds our event
-        text(f"{time_base} <= {start_minutes} AND {end_time_base} >= {end_minutes}"),
+    overlap_conditions = f"""
+    (
+        ({event_start} >= {start_minutes} AND {event_start} < {end_minutes}) OR
+        ({event_end} > {start_minutes} AND {event_end} <= {end_minutes}) OR
+        ({event_start} <= {start_minutes} AND {event_end} >= {end_minutes})
     )
+    """
+    return text(overlap_conditions)
 
 
 def check_anchor_x_anchor_conflict(
@@ -113,10 +117,12 @@ def check_anchor_x_recurrence_conflict(
         .filter(
             Event.recurrence_rule_id.isnot(None),
             text(f"recurrence_rule.days_of_week LIKE '%{weekday.value}%'"),
+            Event.start_datetime <= start_datetime,
             get_time_overlap_conditions(start_datetime, end_datetime),
         )
-        .all()
     )
+
+    existing_events = existing_events.all()
 
     return len(existing_events) > 0
 
@@ -128,19 +134,23 @@ def check_recurrence_x_anchor_conflict(
     days_of_week: List[Weekday],
 ) -> bool:
     """Check if a new recurring event conflicts with existing anchor events."""
-    # Convert weekdays to their string values for SQL comparison
     weekday_values = [day.value for day in days_of_week]
 
-    # Find non-recurring events that happen on any of our weekdays
-    existing_events = (
-        db.query(Event)
-        .filter(
-            Event.recurrence_rule_id.is_(None),
-            or_(*[text(f"UPPER(strftime('%A', event.start_datetime)) = '{day}'") for day in weekday_values]),
-            get_time_overlap_conditions(start_datetime, end_datetime),
-        )
-        .all()
+    # Create SQLAlchemy weekday check using the CASE statement we developed
+    weekday_check = case(
+        {0: "SUNDAY", 1: "MONDAY", 2: "TUESDAY", 3: "WEDNESDAY", 4: "THURSDAY", 5: "FRIDAY", 6: "SATURDAY"},
+        value=cast(func.strftime("%w", Event.start_datetime), Integer),
     )
+
+    # Find non-recurring events that happen on any of our weekdays
+    existing_events = db.query(Event).filter(
+        Event.recurrence_rule_id.is_(None),
+        Event.start_datetime >= start_datetime,
+        weekday_check.in_(weekday_values),
+        get_time_overlap_conditions(start_datetime, end_datetime),
+    )
+
+    existing_events = existing_events.all()
 
     return len(existing_events) > 0
 
@@ -164,8 +174,9 @@ def check_recurrence_x_recurrence_conflict(
             or_(*[text(f"recurrence_rule.days_of_week LIKE '%{day}%'") for day in weekday_values]),
             get_time_overlap_conditions(start_datetime, end_datetime),
         )
-        .all()
     )
+
+    existing_events = existing_events.all()
 
     return len(existing_events) > 0
 

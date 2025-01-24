@@ -47,6 +47,7 @@ export function formatEvent(event: Event): FormattedEvent {
     weekday: "short",
     month: "short",
     day: "numeric",
+    year: "numeric",
     timeZone: event.timezone,
   });
 
