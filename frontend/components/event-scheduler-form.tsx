@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import { useFormStatus } from "react-dom";
-import { useActionState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -11,6 +10,12 @@ import { cn } from "@/lib/utils";
 import { scheduleEventAction } from "@/lib/actions";
 import { Check } from "lucide-react";
 import { EventResponse } from "@/lib/schema";
+
+interface FormState {
+  success: boolean;
+  data: EventResponse | null;
+  errors: Record<string, string> | null;
+}
 
 const daysOfWeek = [
   { value: "MONDAY", label: "Mon" },
@@ -30,7 +35,7 @@ export function EventSchedulerForm({
   onSuccess?: (eventData: EventResponse) => void;
 }) {
   const formRef = React.useRef<HTMLFormElement>(null);
-  const [state] = useActionState(scheduleEventAction, {
+  const [state, setState] = React.useState<FormState>({
     success: false,
     data: null,
     errors: null,
@@ -130,6 +135,8 @@ export function EventSchedulerForm({
     };
 
     const result = await scheduleEventAction(state, data);
+    setState(result);
+
     if (result.success && result.data && onSuccess) {
       onSuccess(result.data);
       formRef.current?.reset();

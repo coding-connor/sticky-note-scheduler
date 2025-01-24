@@ -73,8 +73,8 @@ class EventBase(BaseModel):
             local_end = self.end_datetime.astimezone(local_tz)
 
             # Check if end time is after 9 PM in user's timezone
-            if local_end.time() > time(21, 0):
-                raise ValueError(f"Events cannot end after 9:00 PM in {self.timezone}")
+            if local_end.time() > time(23, 59):
+                raise ValueError(f"Events cannot end after midnight in {self.timezone}")
         except Exception as e:
             raise ValueError(f"Error validating end time: {str(e)}")
 
